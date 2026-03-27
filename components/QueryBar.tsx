@@ -1,11 +1,21 @@
 "use client";
 
-import React, { useState } from 'react';
-import { Sparkles, TerminalSquare, ArrowRight, Command } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Sparkles, TerminalSquare, ArrowRight, Command, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export function QueryBar() {
-  const [query, setQuery] = useState('');
+interface QueryBarProps {
+  onGenerate: (query: string, mode: 'nl' | 'sql') => void;
+  isGenerating?: boolean;
+  initialQuery?: string;
+}
+
+export function QueryBar({ onGenerate, isGenerating, initialQuery }: QueryBarProps) {
+  const [query, setQuery] = useState(initialQuery || '');
+
+  useEffect(() => {
+    if (initialQuery) setQuery(initialQuery);
+  }, [initialQuery]);
   const [isFocused, setIsFocused] = useState(false);
   const [mode, setMode] = useState<'nl' | 'sql'>('nl'); // Natural language or SQL
 
@@ -71,6 +81,12 @@ export function QueryBar() {
                 ? "Ask a question about your data... (e.g., 'Show me users who churned last month')" 
                 : "SELECT * FROM users WHERE status = 'churned'..."
             }
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                if (query.trim() && !isGenerating) onGenerate(query, mode);
+              }
+            }}
             className="w-full min-h-[100px] bg-transparent text-zinc-100 placeholder-zinc-500 p-4 resize-none outline-none text-sm md:text-base leading-relaxed"
             style={{ 
               fontFamily: mode === 'sql' ? "'JetBrains Mono', 'Fira Code', monospace" : "inherit"
@@ -95,16 +111,26 @@ export function QueryBar() {
           </div>
           
           <button 
-            disabled={!query.trim()}
+            disabled={!query.trim() || isGenerating}
+            onClick={() => onGenerate(query, mode)}
             className={cn(
               "flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 shadow-lg",
-              query.trim() 
+              query.trim() && !isGenerating
                 ? "bg-white text-black hover:bg-zinc-200 hover:shadow-white/20 hover:-translate-y-0.5" 
                 : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
             )}
           >
-            <span>{mode === 'nl' ? 'Generate & Run' : 'Run Query'}</span>
-            <ArrowRight className="w-4 h-4 ml-2" />
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                <span>Generating SQL...</span>
+              </>
+            ) : (
+              <>
+                <span>{mode === 'nl' ? 'Generate & Run' : 'Run Query'}</span>
+                <ArrowRight className="w-4 h-4 ml-2" />
+              </>
+            )}
           </button>
         </div>
       </div>

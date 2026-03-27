@@ -71,7 +71,12 @@ const mockData: QueryResultRow[] = [
   { id: "usr_6t3r", name: "Frank Miller", email: "frank@massive.com", status: "Churned", lastLogin: "1 year ago", revenue: 300 },
 ];
 
-export function LiveGrid() {
+export interface LiveGridProps {
+  hasRunQuery?: boolean;
+  isExecuting?: boolean;
+}
+
+export function LiveGrid({ hasRunQuery = false, isExecuting = false }: LiveGridProps) {
   const [data] = useState(() => [...mockData]);
 
   const table = useReactTable({
@@ -84,8 +89,15 @@ export function LiveGrid() {
     },
   });
 
-  // State to simulate "empty/no query run" vs "results"
-  const [hasRunQuery, setHasRunQuery] = useState(true);
+  if (isExecuting) {
+    return (
+      <div className="w-full flex flex-col items-center justify-center p-12 border border-zinc-800 rounded-xl bg-zinc-900/30 min-h-[400px] animate-pulse">
+        <div className="w-12 h-12 border-4 border-zinc-800 border-t-accent rounded-full animate-spin mb-6" />
+        <h3 className="text-lg font-medium text-zinc-300">Running Query...</h3>
+        <p className="text-sm mt-2 text-zinc-500">Fetching live data from the database.</p>
+      </div>
+    );
+  }
 
   if (!hasRunQuery) {
     return (
