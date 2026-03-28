@@ -15,8 +15,8 @@ import {
   AlertTriangle,
   Search,
   Layers,
-  Shield,
   Key,
+  BookOpen,
 } from "lucide-react";
 
 // ─── Mock Schema Data ────────────────────────────────────────────
@@ -169,11 +169,11 @@ function SchemaOverview() {
 
 function TableCard({ table }: { table: TableInfo }) {
   return (
-    <Card className="bg-card border-zinc-800 hover:border-zinc-700 transition-colors group">
+    <Card className="bg-card border-zinc-800 hover:border-zinc-700 group hover:-translate-y-0.5 transition-all duration-300">
       <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 group-hover:border-zinc-700 transition-colors">
-            <table.icon className="w-4 h-4 text-zinc-300" />
+          <div className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 group-hover:border-zinc-700 group-hover:bg-zinc-800/50 transition-all">
+            <table.icon className="w-4 h-4 text-zinc-400 group-hover:text-zinc-200 transition-colors" />
           </div>
           <div>
             <CardTitle className="text-base font-semibold font-mono">{table.name}</CardTitle>
@@ -227,17 +227,24 @@ export default function SchemaStoryPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex-1 flex flex-col p-8 max-w-6xl mx-auto w-full">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold tracking-tight mb-2">Schema Story</h1>
-          <p className="text-zinc-400">An intelligent overview of your database structure, health, and purpose.</p>
+      <div className="flex-1 flex flex-col p-6 lg:p-8 max-w-6xl mx-auto w-full">
+        <header className="mb-8 animate-fade-in">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2 rounded-lg bg-accent/10 border border-accent/20">
+              <BookOpen className="w-5 h-5 text-accent" />
+            </div>
+            <h1 className="text-2xl lg:text-3xl font-bold tracking-tight">Schema Story</h1>
+          </div>
+          <p className="text-zinc-400 text-sm ml-[52px]">An intelligent overview of your database structure, health, and purpose.</p>
         </header>
 
         <div className="flex flex-col gap-6">
-          <SchemaOverview />
+          <div className="animate-fade-in" style={{ animationDelay: '50ms' }}>
+            <SchemaOverview />
+          </div>
 
           {/* Search */}
-          <div className="relative max-w-md">
+          <div className="relative max-w-md animate-fade-in" style={{ animationDelay: '100ms' }}>
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
             <Input
               placeholder="Filter tables..."
@@ -249,14 +256,20 @@ export default function SchemaStoryPage() {
 
           {/* Table Cards Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filtered.map((t) => (
-              <TableCard key={t.name} table={t} />
+            {filtered.map((t, i) => (
+              <div key={t.name} className="animate-fade-in" style={{ animationDelay: `${150 + i * 50}ms` }}>
+                <TableCard table={t} />
+              </div>
             ))}
           </div>
 
           {filtered.length === 0 && (
-            <div className="text-center py-12 text-zinc-500 text-sm">
-              No tables match your search.
+            <div className="flex flex-col items-center justify-center py-16 text-center animate-fade-in">
+              <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-4">
+                <Search className="w-6 h-6 text-zinc-600" />
+              </div>
+              <h3 className="text-zinc-400 font-medium mb-1">No tables found</h3>
+              <p className="text-zinc-500 text-sm">Try adjusting your search term.</p>
             </div>
           )}
         </div>
