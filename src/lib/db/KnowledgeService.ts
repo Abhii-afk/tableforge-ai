@@ -45,4 +45,19 @@ export class KnowledgeService {
     );
     return result.rows;
   }
+
+  static summarizeSchema(schema: any): string {
+    if (!schema || !Array.isArray(schema.tables)) {
+      return 'Schema not available';
+    }
+    const tableCount = schema.tables.length;
+    return `Schema contains ${tableCount} table${tableCount === 1 ? '' : 's'}.`;
+  }
+
+  static getTableNames(schema: any): string[] {
+    if (!schema || !Array.isArray(schema.tables)) {
+      return [];
+    }
+    return schema.tables.filter((t: any) => t?.name).map((t: any) => t.name);
+  }
 }

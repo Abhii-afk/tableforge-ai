@@ -1,6 +1,12 @@
 import { config } from "dotenv";
 config();
 
+const requiredEnv = ["DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"];
+const missingEnv = requiredEnv.filter((key) => !process.env[key]);
+if (missingEnv.length > 0) {
+  throw new Error(`Missing environment variables: ${missingEnv.join(", ")}`);
+}
+
 import { Pool } from "pg";
 import { faker } from "@faker-js/faker";
 import { randomUUID } from "crypto";

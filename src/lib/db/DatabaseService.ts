@@ -27,7 +27,8 @@ interface SchemaSnapshot {
 
 interface SessionData {
   client: PoolClient;
-  schemaSnapshot: any;
+  pool: Pool;
+  schemaSnapshot: SchemaSnapshot;
 }
 
 export class DatabaseService {
@@ -57,15 +58,21 @@ export class DatabaseService {
   }
 
   async connect(config: DatabaseConfig): Promise<{ sessionId: string; schemaSnapshot: SchemaSnapshot }> {
+    const pool = new Pool(config);
+    let client: PoolClient | null = null;
+
     try {
-      const pool = new Pool(config);
-      const client = await pool.connect();
+      client = await pool.connect();
       const sessionId = crypto.randomUUID();
       const schemaSnapshot = await this.introspect(client);
-      this.sessions.set(sessionId, { client, schemaSnapshot });
+      this.sessions.set(sessionId, { client, pool, schemaSnapshot });
       return { sessionId, schemaSnapshot };
     } catch (error) {
-      throw new Error(`Failed to connect to database: ${error}`);
+      if (client) {
+        client.release();
+      }
+      await pool.end().catch(() => {});
+      throw new Error(`Failed to connect to database`);
     }
   }
 
@@ -162,23 +169,38 @@ export class DatabaseService {
     }
   }
 
-  async execute(sessionId: string, sql: string): Promise<{ rows: any[]; fields: any[] }> {
+  async execute(sessionId: string, sql: string, timeoutMs = 5000): Promise<{ rows: any[]; fields: any[] }> {
+    if (!sql.trim().toLowerCase().startsWith('select')) {
+      throw new Error('Only SELECT queries allowed');
+    }
+
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
     try {
-      const session = this.sessions.get(sessionId);
-      if (!session) {
-        throw new Error('Session not found');
-      }
+      await session.client.query('SET LOCAL statement_timeout = $1', [timeoutMs]);
       const result = await session.client.query<any>(sql);
-      return { rows: result.rows, fields: result.fields };
-    } catch (error) {
-      throw new Error(`Failed to execute query: ${error}`);
+      return { rows: result.rows, fields: result.fields || [] };
+    } catch {
+      throw new Error('Query execution failed');
     }
   }
 
-  disconnect(sessionId: string): void {
+  async disconnect(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (session) {
-      session.client.release();
+      try {
+        session.client.release();
+      } catch {
+        // ignore
+      }
+      try {
+        await session.pool.end();
+      } catch {
+        // ignore
+      }
       this.sessions.delete(sessionId);
     }
   }
