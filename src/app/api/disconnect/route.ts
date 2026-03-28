@@ -3,20 +3,16 @@ import { DatabaseService } from '@/lib/db/DatabaseService';
 
 const dbService = DatabaseService.getInstance();
 
-interface DisconnectBody {
-  sessionId: string;
-}
-
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as DisconnectBody;
+    const body = await request.json();
+    const sessionId = body?.sessionId;
 
-    if (!body?.sessionId) {
+    if (!sessionId) {
       return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
     }
 
-    await dbService.disconnect(body.sessionId);
-
+    await dbService.disconnect(sessionId);
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Disconnect failed';
