@@ -13,3 +13,4 @@ out/
 # Debug / OS
 *.tsbuildinfo
 .DS_Store
+dev.log
