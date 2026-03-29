@@ -6,6 +6,7 @@ A lightweight Next.js (App Router) backend for exploring PostgreSQL schemas with
 - ✅ Next.js 16 App Router API routes for DB workflows
   - `POST /api/connect` — open a session and fetch schema snapshot
   - `POST /api/schema` / `GET /api/schema` — retrieve schema snapshot for a session
+  - `POST /api/query` — natural-language → SQL preview via `TranslationService` (requires `x-session-id` or `sessionid` header + JSON `{ "nlInput": "..." }`; returns preview + embedding)
   - `POST /api/execute` — run read-only `SELECT` queries
   - `POST /api/disconnect` — close session and release resources
 - ✅ PostgreSQL + pgvector via Docker Compose
@@ -23,7 +24,7 @@ A lightweight Next.js (App Router) backend for exploring PostgreSQL schemas with
 - Containerization: Docker Compose
 
 ## Project Structure
-- `src/app/api/` — Next.js route handlers (`connect`, `schema`, `execute`, `disconnect`)
+- `src/app/api/` — Next.js route handlers (`connect`, `schema`, `query`, `execute`, `disconnect`)
 - `src/lib/db/DatabaseService.ts` — session management, schema introspection, SELECT execution
 - `src/lib/db/KnowledgeService.ts` — pgvector-backed query history utilities
 - `src/lib/db/pool.ts` — pool helper
@@ -58,6 +59,9 @@ DB_PORT=5432
 DB_NAME=tableforge
 DB_USER=postgres
 DB_PASSWORD=postgres
+
+# Anthropic (required for /api/query — TranslationService)
+ANTHROPIC_API_KEY=your_key_here
 ```
 
 ## Running the Project
@@ -81,4 +85,5 @@ npx tsx path/to/script.ts
 ## API Notes
 - Only `SELECT` statements are allowed via `/api/execute`; other statements are rejected.
 - Schema snapshots include tables, columns, PK/FK/unique, and nullability details from `public` schema.
-- Sessions are identified by `sessionId` returned from `/api/connect`; include it in subsequent calls.
+- Sessions are identified by `sessionId` returned from `/api/connect`; include it in subsequent calls (e.g. header `x-session-id` on `GET /api/schema` and `POST /api/query`).
+- `POST /api/query`: send header `x-session-id` (or `sessionid`) and body `{ "nlInput": "<natural language>" }`. Invalid or missing session returns `400` with `Invalid session`. Translation failures return `502`.
