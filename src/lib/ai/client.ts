@@ -1,19 +1,17 @@
 /// <reference types="node" />
 
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-let anthropicClient: Anthropic | null = null;
+let genAI: GoogleGenerativeAI | null = null;
 
-export function getAnthropicClient(): Anthropic {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error("ANTHROPIC_API_KEY is not set in environment variables.");
+export function getGeminiClient(): GoogleGenerativeAI {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY is not set in environment variables.");
   }
 
-  if (!anthropicClient) {
-    anthropicClient = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
-    });
+  if (!genAI) {
+    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   }
 
-  return anthropicClient;
+  return genAI;
 }
