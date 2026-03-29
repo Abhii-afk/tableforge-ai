@@ -72,7 +72,9 @@ export class DatabaseService {
         client.release();
       }
       await pool.end().catch(() => {});
-      throw new Error(`Failed to connect to database`);
+      const detail =
+        error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to connect to database: ${detail}`);
     }
   }
 
