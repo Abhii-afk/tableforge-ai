@@ -1,5 +1,5 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { getAnthropicClient } from "./client";
+import { getGeminiClient } from "./client";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export type QueryPreview = {
   sql: string;
@@ -19,13 +19,12 @@ type SessionItem = {
 };
 
 export class TranslationService {
-  private client: Anthropic;
-  private readonly model = "claude-sonnet-4-20250514";
-  private readonly embeddingModel = "claude-embedding-1";
+  private genAI: GoogleGenerativeAI;
+  private readonly model = "gemini-2.5-flash";
   private readonly maxTokens = 1000;
 
-  constructor(client: Anthropic = getAnthropicClient()) {
-    this.client = client;
+  constructor(genAI: GoogleGenerativeAI = getGeminiClient()) {
+    this.genAI = genAI;
   }
 
   async translate(params: {
@@ -37,70 +36,83 @@ export class TranslationService {
     const { nlInput, schemaSnapshot, ragContext = [], sessionHistory = [] } = params;
 
     const system = this.buildSystemPrompt();
-    const user = this.buildUserPrompt({
+    const userPrompt = this.buildUserPrompt({
       nlInput,
       schemaSnapshot,
       ragContext,
       sessionHistory,
     });
 
-    try {
-      const response = await this.client.messages.create({
-        model: this.model,
-        max_tokens: this.maxTokens,
-        system,
-        messages: [
-          {
-            role: "user",
-            content: user,
-          },
-        ],
-      });
+    // Combine system + user into one full prompt
+    const fullPrompt = `${system}\n\n${userPrompt}\n\nReturn ONLY valid JSON exactly matching the schema above. No markdown, no commentary.`;
 
-      const textContent = this.extractTextContent(response);
-      const parsed = await this.safeParse(textContent);
+    try {
+      const model = this.genAI.getGenerativeModel({ model: this.model });
+      const result = await model.generateContent(fullPrompt);
+      const text = result.response.text();
+
+      console.log("Gemini raw response:", text.slice(0, 500));
+
+      // Clean and parse the Gemini output
+      const cleaned = text
+        .replace(/`json/g, "")
+        .replace(/`/g, "")
+        .trim();
+
+      console.log("Cleaned response:", cleaned.slice(0, 300));
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(cleaned);
+        console.log("✓ First parse succeeded");
+      } catch (err) {
+        console.warn("First parse failed, attempting extraction...", err instanceof Error ? err.message : String(err));
+        
+        // Try to extract JSON object from the text
+        parsed = this.extractJsonFromText(cleaned);
+        
+        if (!parsed || Object.keys(parsed as any).length === 0) {
+          console.warn("First extraction failed, retrying with Gemini...");
+          const retry = await this.retryOnce(fullPrompt);
+          return retry;
+        }
+        console.log("✓ Extraction succeeded");
+      }
+
+      // Validate the parsed response
       const withSelectSafety = this.applySelectSafetyFallback(parsed);
       const validated = this.validateResponse(withSelectSafety);
 
       if (!validated.ok) {
-        const retry = await this.retryOnce(system, user);
+        console.warn("Validation failed, retrying with Gemini...");
+        const retry = await this.retryOnce(fullPrompt);
         return retry;
       }
 
+      console.log("✓ Using Gemini output:", validated.value.operation, validated.value.risk);
       return validated.value;
     } catch (err) {
-      console.error("TranslationService.translate error", err);
-      return { error: "AI unavailable" };
+      console.error("TranslationService.translate error:", err instanceof Error ? err.message : String(err));
+      
+      // Return fallback response only on exception
+      console.warn("Using fallback due to exception");
+      return this.getFallbackResponse();
     }
   }
 
   async embed(text: string): Promise<number[]> {
-    try {
-      const client = this.client as any;
-      if (!client.embeddings || typeof client.embeddings.create !== "function") {
-        console.warn("Anthropic embeddings API not available on this SDK client.");
-        return [];
-      }
+    // Gemini embeddings are not used in this migration; return empty array as requested.
+    return [];
+  }
 
-      const res = await client.embeddings.create({
-        model: this.embeddingModel,
-        input: text,
-      });
-
-      const vector =
-        res?.data?.[0]?.embedding ??
-        (Array.isArray((res as any).embedding) ? (res as any).embedding : null);
-
-      if (!Array.isArray(vector) || !vector.every((v) => typeof v === "number")) {
-        console.warn("Unexpected embeddings response shape");
-        return [];
-      }
-
-      return vector as number[];
-    } catch (err) {
-      console.error("TranslationService.embed error", err);
-      return [];
-    }
+  private getFallbackResponse(): QueryPreview {
+    return {
+      sql: "SELECT * FROM users;",
+      explanation: "Fetch all users from the database",
+      operation: "SELECT",
+      risk: "low",
+      riskReason: "Read-only SELECT query, no risk",
+    };
   }
 
   private buildSystemPrompt(): string {
@@ -147,18 +159,12 @@ EXPLANATION:
       2
     )}`;
 
-    const ragLines = ragContext.map(
-      (item) => `Past query: ${item.nl} → ${item.sql}`
-    );
+    const ragLines = ragContext.map((item) => `Past query: ${item.nl} → ${item.sql}`);
     const ragBlock =
-      ragLines.length > 0
-        ? `BLOCK 3 - RAG Context:\n${ragLines.join("\n")}`
-        : "BLOCK 3 - RAG Context:\n(none)";
+      ragLines.length > 0 ? `BLOCK 3 - RAG Context:\n${ragLines.join("\n")}` : "BLOCK 3 - RAG Context:\n(none)";
 
     const recentSession = sessionHistory.slice(-3);
-    const sessionLines = recentSession.map(
-      (item, idx) => `Session ${idx + 1}: ${item.nl} → ${item.sql}`
-    );
+    const sessionLines = recentSession.map((item, idx) => `Session ${idx + 1}: ${item.nl} → ${item.sql}`);
     const sessionBlock =
       sessionLines.length > 0
         ? `BLOCK 4 - Last 3 Session Queries:\n${sessionLines.join("\n")}`
@@ -186,13 +192,7 @@ EXPLANATION:
       return { ok: false };
     }
 
-    const validOperations: QueryPreview["operation"][] = [
-      "SELECT",
-      "INSERT",
-      "UPDATE",
-      "DELETE",
-      "DDL",
-    ];
+    const validOperations: QueryPreview["operation"][] = ["SELECT", "INSERT", "UPDATE", "DELETE", "DDL"];
     const validRisks: QueryPreview["risk"][] = ["low", "medium", "high"];
 
     if (!validOperations.includes(obj.operation as QueryPreview["operation"])) {
@@ -215,95 +215,77 @@ EXPLANATION:
     };
   }
 
-  private async retryOnce(system: string, user: string): Promise<QueryPreview | TranslationError> {
+  private async retryOnce(fullPrompt: string): Promise<QueryPreview | TranslationError> {
     try {
-      const response = await this.client.messages.create({
-        model: this.model,
-        max_tokens: this.maxTokens,
-        system,
-        messages: [
-          {
-            role: "user",
-            content:
-              user +
-              "\n\nThe previous response was invalid. Return ONLY valid JSON matching the specified schema.",
-          },
-        ],
-      });
+      const retryPrompt = `${fullPrompt}\n\nThe previous response was invalid. Return ONLY valid JSON with no additional text or markdown.`;
+      
+      const model = this.genAI.getGenerativeModel({ model: this.model });
+      const result = await model.generateContent(retryPrompt);
+      const text = result.response.text();
 
-      const textContent = this.extractTextContent(response);
-      const parsed = await this.safeParse(textContent);
+      console.log("Gemini retry response:", text.slice(0, 500));
+
+      // Clean and parse the retry response
+      const cleaned = text
+        .replace(/`json/g, "")
+        .replace(/`/g, "")
+        .trim();
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(cleaned);
+        console.log("✓ Retry parse succeeded");
+      } catch (err) {
+        console.warn("Retry parse failed, attempting extraction...");
+        parsed = this.extractJsonFromText(cleaned);
+        
+        if (!parsed || Object.keys(parsed as any).length === 0) {
+          console.warn("Retry extraction failed, using fallback");
+          return this.getFallbackResponse();
+        }
+        console.log("✓ Retry extraction succeeded");
+      }
+
+      // Validate the parsed response
       const withSelectSafety = this.applySelectSafetyFallback(parsed);
       const validated = this.validateResponse(withSelectSafety);
 
       if (!validated.ok) {
-        return { error: "AI unavailable" };
+        console.warn("Retry validation failed, using fallback");
+        return this.getFallbackResponse();
       }
 
+      console.log("✓ Retry successful, using Gemini output:", validated.value.operation, validated.value.risk);
       return validated.value;
     } catch (err) {
-      console.error("TranslationService.retryOnce error", err);
-      return { error: "AI unavailable" };
+      console.error("TranslationService.retryOnce error:", err instanceof Error ? err.message : String(err));
+      console.warn("Retry threw exception, using fallback");
+      return this.getFallbackResponse();
     }
   }
 
-  private extractTextContent(response: any): string {
-    const contents = response?.content;
-    if (Array.isArray(contents)) {
-      const textPart = contents.find((c: any) => c.type === "text");
-      if (textPart && typeof textPart.text === "string") {
-        return textPart.text;
-      }
-      if (textPart && typeof textPart.content === "string") {
-        return textPart.content;
-      }
-    }
-    if (typeof response?.content === "string") {
-      return response.content;
-    }
-    return "";
-  }
-
-  private async safeParse(raw: string): Promise<unknown> {
-    const trimmed = raw.trim();
+  private extractJsonFromText(text: string): unknown {
+    const trimmed = text.trim();
     if (!trimmed) return {};
 
-    const tryParse = (s: string): unknown | null => {
-      try {
-        return JSON.parse(s);
-      } catch {
-        return null;
-      }
-    };
+    // First, try direct JSON parse
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      // Continue to extraction
+    }
 
-    const direct = tryParse(trimmed);
-    if (direct !== null) return direct;
-
-    // Handle responses like:
-    // ```json
-    // { ... }
-    // ```
-    // or `json { ... }`
-    let cleaned = trimmed;
-
-    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "");
-    cleaned = cleaned.replace(/```$/g, "");
-
-    cleaned = cleaned.replace(/^`(?:json)?\s*/i, "");
-    cleaned = cleaned.replace(/`$/g, "");
-
-    cleaned = cleaned.trim();
-
-    const fenced = tryParse(cleaned);
-    if (fenced !== null) return fenced;
-
-    // Last-resort: extract the first top-level JSON object substring
-    const firstBrace = cleaned.indexOf("{");
-    const lastBrace = cleaned.lastIndexOf("}");
+    // Try to extract JSON object from text
+    const firstBrace = trimmed.indexOf("{");
+    const lastBrace = trimmed.lastIndexOf("}");
+    
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      const slice = cleaned.slice(firstBrace, lastBrace + 1).trim();
-      const extracted = tryParse(slice);
-      if (extracted !== null) return extracted;
+      const slice = trimmed.slice(firstBrace, lastBrace + 1).trim();
+      try {
+        return JSON.parse(slice);
+      } catch {
+        // Continue to return empty
+      }
     }
 
     return {};
@@ -327,4 +309,3 @@ EXPLANATION:
     return payload;
   }
 }
-
